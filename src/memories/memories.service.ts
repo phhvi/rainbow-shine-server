@@ -1,9 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateMemoryDto } from './dto/create-memory.dto';
 import { UpdateMemoryDto } from './dto/update-memory.dto';
 import { Memory } from './entities/memory.entity';
+import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class MemoriesService {
@@ -17,60 +22,96 @@ export class MemoriesService {
     private readonly memoryRepository: Repository<Memory>,
   ) {}
 
-  // EXPLANATION: Create a new memory
-  // - Before: We manually created an object and pushed it to an array
-  // - Now: We use repository.create() to prepare the memory object
-  //   Then repository.save() to actually save it to the database
-  // - The database automatically generates the ID and timestamps
-  // - async/await is used because database operations take time
-  async create(createMemoryDto: CreateMemoryDto): Promise<Memory> {
-    const memory = this.memoryRepository.create(createMemoryDto);
+  // EXPLANATION: Create a new memory in the user's current space
+  // - Now requires authentication - user must be in a space to create memories
+  // - Each memory is associated with both a space and the user who created it
+  async create(
+    createMemoryDto: CreateMemoryDto,
+    userId: string,
+  ): Promise<Memory> {
+    // TODO: In a real implementation, we would fetch the user's current space ID
+    // For now, we'll require spaceId in the DTO
+    if (!createMemoryDto.spaceId) {
+      throw new UnauthorizedException(
+        'You must be in a space to create memories',
+      );
+    }
+
+    const memory = this.memoryRepository.create({
+      ...createMemoryDto,
+      createdByUserId: userId,
+    });
+
     return await this.memoryRepository.save(memory);
   }
 
-  // EXPLANATION: Get all memories
-  // - Before: We returned the in-memory array
-  // - Now: We use repository.find() to query the database
-  // - We can add options like "order" to sort by newest first
-  // - The database does the sorting for us efficiently
-  async findAll(): Promise<Memory[]> {
+  // EXPLANATION: Get all memories for the user's current space
+  // - Now returns memories only from the user's current space
+  // - This implements the privacy of shared spaces
+  async findAll(spaceId: string): Promise<Memory[]> {
+    if (!spaceId) {
+      throw new UnauthorizedException(
+        'You must be in a space to view memories',
+      );
+    }
+
     return await this.memoryRepository.find({
+      where: { spaceId },
       order: {
         createdAt: 'DESC', // Sort by newest first
       },
+      relations: ['createdByUser'], // Include user who created the memory
     });
   }
 
-  // EXPLANATION: Get one memory by ID
-  // - Before: We used array.find() to search the array
-  // - Now: We use repository.findOne() with a "where" clause
-  // - This generates a SQL query like: SELECT * FROM memories WHERE id = ?
-  // - If not found, we throw NotFoundException (HTTP 404)
-  async findOne(id: number): Promise<Memory> {
-    const memory = await this.memoryRepository.findOne({ where: { id } });
+  // EXPLANATION: Get one memory by ID (only if it belongs to user's space)
+  // - Added security: Users can only access memories in their own space
+  async findOne(id: number, spaceId: string): Promise<Memory> {
+    const memory = await this.memoryRepository.findOne({
+      where: { id, spaceId },
+      relations: ['createdByUser'],
+    });
+
     if (!memory) {
       throw new NotFoundException(`Memory with ID ${id} not found`);
     }
+
     return memory;
   }
 
-  // EXPLANATION: Update a memory
-  // - First, we find the memory (this also checks if it exists)
-  // - Object.assign() merges the update data into the existing memory
-  // - repository.save() updates the record in the database
-  // - TypeORM automatically updates the "updatedAt" timestamp
-  async update(id: number, updateMemoryDto: UpdateMemoryDto): Promise<Memory> {
-    const memory = await this.findOne(id);
+  // EXPLANATION: Update a memory (only if it belongs to user's space)
+  // - Added security: Users can only update memories in their own space
+  async update(
+    id: number,
+    updateMemoryDto: UpdateMemoryDto,
+    spaceId: string,
+    userId: string,
+  ): Promise<Memory> {
+    const memory = await this.findOne(id, spaceId);
+
+    // Optional: Only allow the creator to update their own memories
+    // if (memory.createdByUserId !== userId) {
+    //   throw new UnauthorizedException(
+    //     'You can only update your own memories',
+    //   );
+    // }
+
     Object.assign(memory, updateMemoryDto);
     return await this.memoryRepository.save(memory);
   }
 
-  // EXPLANATION: Delete a memory
-  // - First, we find the memory (this checks if it exists)
-  // - repository.remove() deletes the record from the database
-  // - This generates a SQL DELETE query
-  async remove(id: number): Promise<void> {
-    const memory = await this.findOne(id);
+  // EXPLANATION: Delete a memory (only if it belongs to user's space)
+  // - Added security: Users can only delete memories in their own space
+  async remove(id: number, spaceId: string, userId: string): Promise<void> {
+    const memory = await this.findOne(id, spaceId);
+
+    // Optional: Only allow the creator to delete their own memories
+    // if (memory.createdByUserId !== userId) {
+    //   throw new UnauthorizedException(
+    //     'You can only delete your own memories',
+    //   );
+    // }
+
     await this.memoryRepository.remove(memory);
   }
 }
