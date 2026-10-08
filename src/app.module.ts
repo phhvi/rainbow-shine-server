@@ -15,9 +15,10 @@ import { MemoriesModule } from './memories/memories.module';
       url: process.env.DATABASE_URL,
       autoLoadEntities: true,
       synchronize: true, // Set to false in production
-      ssl: {
-        rejectUnauthorized: false,
-      },
+      ssl:
+        process.env.DATABASE_SSL === 'true'
+          ? { rejectUnauthorized: false }
+          : false,
     }),
     MemoriesModule,
   ],

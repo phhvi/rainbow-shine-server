@@ -14,7 +14,7 @@ async function bootstrap() {
   // This allows your Next.js frontend (running on a different port)
   // to make requests to this backend.
   app.enableCors({
-    origin: 'http://localhost:3000', // Or your frontend URL in production
+    origin: process.env.CLIENT_ORIGIN ?? 'http://localhost:3000',
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
